@@ -1,0 +1,396 @@
+use crate::always_some::AlwaysSome;
+use encase::{ShaderSize, ShaderType, StorageBuffer, UniformBuffer};
+use std::sync::Arc;
+use winit::{dpi::PhysicalSize, window::Window};
+
+#[derive(ShaderType)]
+struct Camera {
+    view_height: f32,
+    aspect: f32,
+}
+
+#[derive(ShaderType)]
+struct Quad {
+    position: cgmath::Vector2<f32>,
+    size: cgmath::Vector2<f32>,
+    color: cgmath::Vector4<f32>,
+}
+
+pub struct Renderer {
+    window: Arc<Window>,
+    surface: wgpu::Surface<'static>,
+    surface_config: wgpu::SurfaceConfiguration,
+    device: wgpu::Device,
+    queue: wgpu::Queue,
+    camera_uniform_buffer: wgpu::Buffer,
+    camera_bind_group: wgpu::BindGroup,
+    quads_storage_buffer: wgpu::Buffer,
+    quads_bind_group_layout: wgpu::BindGroupLayout,
+    quads_bind_group: wgpu::BindGroup,
+    render_pipeline: wgpu::RenderPipeline,
+}
+
+impl Renderer {
+    pub async fn new(window: Arc<Window>) -> Self {
+        let size = window.inner_size();
+
+        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
+            ..Default::default()
+        });
+
+        let surface = instance.create_surface(window.clone()).unwrap();
+
+        let adapter = instance
+            .request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::HighPerformance,
+                compatible_surface: Some(&surface),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+
+        let (device, queue) = adapter
+            .request_device(
+                &wgpu::DeviceDescriptor {
+                    label: Some("Renderer Device"),
+                    required_features: wgpu::Features::default(),
+                    required_limits: wgpu::Limits::default(),
+                    ..Default::default()
+                },
+                None,
+            )
+            .await
+            .unwrap();
+
+        let surface_capabilities = surface.get_capabilities(&adapter);
+        let surface_format = surface_capabilities
+            .formats
+            .iter()
+            .find(|f| f.is_srgb())
+            .copied()
+            .unwrap_or(surface_capabilities.formats[0]);
+        let surface_config = wgpu::SurfaceConfiguration {
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            format: surface_format,
+            width: size.width,
+            height: size.height,
+            present_mode: wgpu::PresentMode::AutoNoVsync,
+            alpha_mode: surface_capabilities.alpha_modes[0],
+            view_formats: vec![],
+            desired_maximum_frame_latency: 2,
+        };
+        surface.configure(&device, &surface_config);
+
+        let camera_uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Camera Uniform Buffer"),
+            size: Camera::SHADER_SIZE.get(),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let camera_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Camera Bind Group Layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: Some(Camera::SHADER_SIZE),
+                    },
+                    count: None,
+                }],
+            });
+        let camera_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Camera Bind Group"),
+            layout: &camera_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: camera_uniform_buffer.as_entire_binding(),
+            }],
+        });
+
+        let quads_storage_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Quads Storage Buffer"),
+            size: <&[Quad]>::min_size().get(),
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let quads_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Quads Bind Group Layout"),
+                entries: &[wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Storage { read_only: true },
+                        has_dynamic_offset: false,
+                        min_binding_size: Some(<&[Quad]>::min_size()),
+                    },
+                    count: None,
+                }],
+            });
+        let quads_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("Quads Bind Group"),
+            layout: &quads_bind_group_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: quads_storage_buffer.as_entire_binding(),
+            }],
+        });
+
+        let shader = device.create_shader_module(wgpu::include_wgsl!("./shader.wgsl"));
+
+        let render_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Render Pipeline Layout"),
+                bind_group_layouts: &[&camera_bind_group_layout, &quads_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Render Pipeline"),
+            layout: Some(&render_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: "vertex",
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleStrip,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: None,
+                unclipped_depth: false,
+                polygon_mode: wgpu::PolygonMode::Fill,
+                conservative: false,
+            },
+            depth_stencil: None,
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: "fragment",
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: surface_format,
+                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                    write_mask: wgpu::ColorWrites::all(),
+                })],
+            }),
+            multiview: None,
+            cache: None,
+        });
+
+        Self {
+            window,
+            surface,
+            surface_config,
+            device,
+            queue,
+            camera_uniform_buffer,
+            camera_bind_group,
+            quads_storage_buffer,
+            quads_bind_group_layout,
+            quads_bind_group,
+            render_pipeline,
+        }
+    }
+
+    pub fn resize(&mut self, size: PhysicalSize<u32>) {
+        if size.width == 0 || size.height == 0 {
+            return;
+        }
+
+        self.surface_config.width = size.width;
+        self.surface_config.height = size.height;
+        self.surface.configure(&self.device, &self.surface_config);
+    }
+}
+
+pub struct FrameRendering<'renderer> {
+    renderer: &'renderer mut Renderer,
+    output: AlwaysSome<wgpu::SurfaceTexture>,
+    render_encoder: AlwaysSome<wgpu::CommandEncoder>,
+    render_pass: AlwaysSome<wgpu::RenderPass<'static>>,
+}
+
+impl<'renderer> FrameRendering<'renderer> {
+    pub fn new(renderer: &'renderer mut Renderer, clear_color: wgpu::Color) -> Option<Self> {
+        let output = match renderer.surface.get_current_texture() {
+            Ok(output) => output,
+            Err(wgpu::SurfaceError::Timeout) => return None,
+            Err(wgpu::SurfaceError::Outdated) => {
+                let size = renderer.window.inner_size();
+                renderer.resize(size);
+                return None;
+            }
+            e => e.unwrap(),
+        };
+        let output_view = output
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+
+        let mut render_encoder =
+            renderer
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Render Encoder"),
+                });
+
+        let render_pass = render_encoder
+            .begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Render Pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &output_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(clear_color),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                occlusion_query_set: None,
+                timestamp_writes: None,
+            })
+            .forget_lifetime();
+
+        Some(FrameRendering {
+            renderer,
+            output: output.into(),
+            render_encoder: render_encoder.into(),
+            render_pass: render_pass.into(),
+        })
+    }
+}
+
+impl Drop for FrameRendering<'_> {
+    fn drop(&mut self) {
+        // make sure to drop render pass before submitting encoder
+        drop(self.render_pass.take());
+        self.renderer
+            .queue
+            .submit(std::iter::once(self.render_encoder.take().finish()));
+
+        self.renderer.window.pre_present_notify();
+        self.output.take().present();
+    }
+}
+
+pub struct Rendering2D<'renderer, 'frame> {
+    frame: &'frame mut FrameRendering<'renderer>,
+    camera_position: cgmath::Vector2<f32>,
+    quads: Vec<Quad>,
+}
+
+impl<'renderer, 'frame> Rendering2D<'renderer, 'frame> {
+    pub fn new(
+        frame: &'frame mut FrameRendering<'renderer>,
+        camera_position: cgmath::Vector2<f32>,
+        camera_height: f32,
+    ) -> Self {
+        frame
+            .render_pass
+            .set_pipeline(&frame.renderer.render_pipeline);
+
+        // Upload camera
+        {
+            let window_size = frame.renderer.window.inner_size();
+            let camera = Camera {
+                view_height: camera_height / 2.0,
+                aspect: window_size.width as f32 / window_size.height as f32,
+            };
+
+            let camera_buffer = &mut *frame
+                .renderer
+                .queue
+                .write_buffer_with(
+                    &frame.renderer.camera_uniform_buffer,
+                    0,
+                    Camera::SHADER_SIZE,
+                )
+                .unwrap();
+
+            UniformBuffer::new(camera_buffer).write(&camera).unwrap();
+        }
+        frame
+            .render_pass
+            .set_bind_group(0, &frame.renderer.camera_bind_group, &[]);
+
+        Self {
+            frame,
+            camera_position,
+            quads: vec![],
+        }
+    }
+
+    pub fn reserve_quads(&mut self, additional: usize) {
+        self.quads.reserve(additional);
+    }
+
+    pub fn draw_quad(
+        &mut self,
+        position: cgmath::Vector2<f32>,
+        size: cgmath::Vector2<f32>,
+        color: cgmath::Vector4<f32>,
+    ) {
+        self.quads.push(Quad {
+            position: position - self.camera_position,
+            size,
+            color,
+        });
+    }
+}
+
+impl Drop for Rendering2D<'_, '_> {
+    fn drop(&mut self) {
+        // Upload quads
+        {
+            let size = self.quads.size();
+
+            if size.get() > self.frame.renderer.quads_storage_buffer.size() {
+                self.frame.renderer.quads_storage_buffer = self
+                    .frame
+                    .renderer
+                    .device
+                    .create_buffer(&wgpu::BufferDescriptor {
+                        label: Some("Quads Storage Buffer"),
+                        size: size.get(),
+                        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                        mapped_at_creation: false,
+                    });
+                self.frame.renderer.quads_bind_group = self
+                    .frame
+                    .renderer
+                    .device
+                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: Some("Quads Bind Group"),
+                        layout: &self.frame.renderer.quads_bind_group_layout,
+                        entries: &[wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: self.frame.renderer.quads_storage_buffer.as_entire_binding(),
+                        }],
+                    });
+            }
+
+            let buffer = &mut *self
+                .frame
+                .renderer
+                .queue
+                .write_buffer_with(&self.frame.renderer.quads_storage_buffer, 0, size)
+                .unwrap();
+
+            StorageBuffer::new(buffer).write(&self.quads).unwrap();
+        }
+        self.frame
+            .render_pass
+            .set_bind_group(1, &self.frame.renderer.quads_bind_group, &[]);
+
+        self.frame
+            .render_pass
+            .draw(0..4, 0..self.quads.len().try_into().unwrap());
+    }
+}

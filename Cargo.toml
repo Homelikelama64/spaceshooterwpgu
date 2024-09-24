@@ -1,0 +1,11 @@
+[package]
+name = "spaceshooter"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+cgmath = "0.18.0"
+encase = { version = "0.10.0", features = ["cgmath"] }
+pollster = "0.3.0"
+wgpu = "22.1.0"
+winit = "0.29"
