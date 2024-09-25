@@ -10,6 +10,7 @@ struct VertexOutput {
 };
 
 struct Camera {
+    position: vec2<f32>,
     view_height: f32,
     aspect: f32,
 };
@@ -22,11 +23,20 @@ struct Quad {
     position: vec2<f32>,
     size: vec2<f32>,
     color: vec4<f32>,
+    rotation: f32,
 };
 
 @group(1)
 @binding(0)
 var<storage, read> quads: array<Quad>;
+
+@group(2)
+@binding(0)
+var texture: texture_2d<f32>;
+
+@group(2)
+@binding(1)
+var texture_sampler: sampler;
 
 @vertex
 fn vertex(input: VertexInput) -> VertexOutput {
@@ -39,9 +49,9 @@ fn vertex(input: VertexInput) -> VertexOutput {
     );
 
     let quad = quads[input.quad_index];
-    let world_position = (output.uv - 0.5) * quad.size + quad.position;
+    let world_position = rotate_vector((output.uv - 0.5) * quad.size, quad.rotation);
 
-    output.clip_position = vec4<f32>(world_position / (camera.view_height * vec2<f32>(camera.aspect, 1.0)), 0.0, 1.0);
+    output.clip_position = vec4<f32>((world_position + quad.position - camera.position) / (camera.view_height * vec2<f32>(camera.aspect, 1.0)), 0.0, 1.0);
 
     return output;
 }
@@ -49,5 +59,13 @@ fn vertex(input: VertexInput) -> VertexOutput {
 @fragment
 fn fragment(input: VertexOutput) -> @location(0) vec4<f32> {
     let quad = quads[input.quad_index];
-    return quad.color;
+    let texture_color = textureSample(texture, texture_sampler, input.uv);
+    return texture_color * quad.color;
+}
+
+fn rotate_vector(vector: vec2<f32>, rotation: f32) -> vec2<f32> {
+    return vec2<f32>(
+        cos(rotation) * vector.x - sin(rotation) * vector.y,
+        sin(rotation) * vector.x + cos(rotation) * vector.y,
+    );
 }

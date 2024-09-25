@@ -6,6 +6,9 @@ edition = "2021"
 [dependencies]
 cgmath = "0.18.0"
 encase = { version = "0.10.0", features = ["cgmath"] }
+perlin2d = "0.2.6"
 pollster = "0.3.0"
+rand = "0.8.5"
+slotmap = "1.0.7"
 wgpu = "22.1.0"
 winit = "0.29"

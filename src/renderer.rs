@@ -1,10 +1,15 @@
 use crate::always_some::AlwaysSome;
 use encase::{ShaderSize, ShaderType, StorageBuffer, UniformBuffer};
+use slotmap::{SlotMap, SparseSecondaryMap};
 use std::sync::Arc;
+use texture::{Texture, TextureId};
 use winit::{dpi::PhysicalSize, window::Window};
+
+pub mod texture;
 
 #[derive(ShaderType)]
 struct Camera {
+    position: cgmath::Vector2<f32>,
     view_height: f32,
     aspect: f32,
 }
@@ -14,6 +19,7 @@ struct Quad {
     position: cgmath::Vector2<f32>,
     size: cgmath::Vector2<f32>,
     color: cgmath::Vector4<f32>,
+    rotation: f32,
 }
 
 pub struct Renderer {
@@ -27,7 +33,11 @@ pub struct Renderer {
     quads_storage_buffer: wgpu::Buffer,
     quads_bind_group_layout: wgpu::BindGroupLayout,
     quads_bind_group: wgpu::BindGroup,
-    render_pipeline: wgpu::RenderPipeline,
+    texture_bind_group_layout: wgpu::BindGroupLayout,
+    quad_render_pipeline: wgpu::RenderPipeline,
+    background_render_pipeline: wgpu::RenderPipeline,
+    textures: SlotMap<TextureId, Texture>,
+    default_texture: TextureId,
 }
 
 impl Renderer {
@@ -92,7 +102,7 @@ impl Renderer {
                 label: Some("Camera Bind Group Layout"),
                 entries: &[wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::VERTEX,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Buffer {
                         ty: wgpu::BufferBindingType::Uniform,
                         has_dynamic_offset: false,
@@ -139,19 +149,46 @@ impl Renderer {
             }],
         });
 
-        let shader = device.create_shader_module(wgpu::include_wgsl!("./shader.wgsl"));
+        let texture_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("Texture Bind Group Layout"),
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            multisampled: false,
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+            });
 
-        let render_pipeline_layout =
+        let quad_shader = device.create_shader_module(wgpu::include_wgsl!("./quad_shader.wgsl"));
+
+        let quad_render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[&camera_bind_group_layout, &quads_bind_group_layout],
+                label: Some("Quad Render Pipeline Layout"),
+                bind_group_layouts: &[
+                    &camera_bind_group_layout,
+                    &quads_bind_group_layout,
+                    &texture_bind_group_layout,
+                ],
                 push_constant_ranges: &[],
             });
-        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Render Pipeline"),
-            layout: Some(&render_pipeline_layout),
+        let quad_render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Quad Render Pipeline"),
+            layout: Some(&quad_render_pipeline_layout),
             vertex: wgpu::VertexState {
-                module: &shader,
+                module: &quad_shader,
                 entry_point: "vertex",
                 compilation_options: Default::default(),
                 buffers: &[],
@@ -172,7 +209,7 @@ impl Renderer {
                 alpha_to_coverage_enabled: false,
             },
             fragment: Some(wgpu::FragmentState {
-                module: &shader,
+                module: &quad_shader,
                 entry_point: "fragment",
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
@@ -185,6 +222,65 @@ impl Renderer {
             cache: None,
         });
 
+        let background_shader =
+            device.create_shader_module(wgpu::include_wgsl!("./background_shader.wgsl"));
+
+        let background_render_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("Background Render Pipeline Layout"),
+                bind_group_layouts: &[&camera_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+        let background_render_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("Background Render Pipeline"),
+                layout: Some(&background_render_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &background_shader,
+                    entry_point: "vertex",
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleStrip,
+                    strip_index_format: None,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: None,
+                    unclipped_depth: false,
+                    polygon_mode: wgpu::PolygonMode::Fill,
+                    conservative: false,
+                },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState {
+                    count: 1,
+                    mask: !0,
+                    alpha_to_coverage_enabled: false,
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &background_shader,
+                    entry_point: "fragment",
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: surface_format,
+                        blend: Some(wgpu::BlendState::ALPHA_BLENDING),
+                        write_mask: wgpu::ColorWrites::all(),
+                    })],
+                }),
+                multiview: None,
+                cache: None,
+            });
+
+        let mut textures = SlotMap::with_key();
+        let default_texture = textures.insert(Texture::new(
+            "Default Texture",
+            1,
+            1,
+            &[255, 255, 255, 255],
+            &device,
+            &queue,
+            &texture_bind_group_layout,
+        ));
+
         Self {
             window,
             surface,
@@ -196,7 +292,11 @@ impl Renderer {
             quads_storage_buffer,
             quads_bind_group_layout,
             quads_bind_group,
-            render_pipeline,
+            texture_bind_group_layout,
+            quad_render_pipeline,
+            background_render_pipeline,
+            textures,
+            default_texture,
         }
     }
 
@@ -208,6 +308,24 @@ impl Renderer {
         self.surface_config.width = size.width;
         self.surface_config.height = size.height;
         self.surface.configure(&self.device, &self.surface_config);
+    }
+
+    pub fn create_texture(
+        &mut self,
+        label: &str,
+        width: u32,
+        height: u32,
+        pixels: &[u8],
+    ) -> TextureId {
+        self.textures.insert(Texture::new(
+            label,
+            width,
+            height,
+            pixels,
+            &self.device,
+            &self.queue,
+            &self.texture_bind_group_layout,
+        ))
     }
 }
 
@@ -282,8 +400,8 @@ impl Drop for FrameRendering<'_> {
 
 pub struct Rendering2D<'renderer, 'frame> {
     frame: &'frame mut FrameRendering<'renderer>,
-    camera_position: cgmath::Vector2<f32>,
-    quads: Vec<Quad>,
+    camera_size: cgmath::Vector2<f32>,
+    quads: SparseSecondaryMap<TextureId, Vec<Quad>>,
 }
 
 impl<'renderer, 'frame> Rendering2D<'renderer, 'frame> {
@@ -292,39 +410,39 @@ impl<'renderer, 'frame> Rendering2D<'renderer, 'frame> {
         camera_position: cgmath::Vector2<f32>,
         camera_height: f32,
     ) -> Self {
-        frame
-            .render_pass
-            .set_pipeline(&frame.renderer.render_pipeline);
+        let renderer = &mut *frame.renderer;
+
+        let window_size = renderer.window.inner_size();
+        let aspect = window_size.width as f32 / window_size.height as f32;
 
         // Upload camera
         {
-            let window_size = frame.renderer.window.inner_size();
             let camera = Camera {
+                position: camera_position,
                 view_height: camera_height / 2.0,
-                aspect: window_size.width as f32 / window_size.height as f32,
+                aspect,
             };
 
-            let camera_buffer = &mut *frame
-                .renderer
+            let camera_buffer = &mut *renderer
                 .queue
-                .write_buffer_with(
-                    &frame.renderer.camera_uniform_buffer,
-                    0,
-                    Camera::SHADER_SIZE,
-                )
+                .write_buffer_with(&renderer.camera_uniform_buffer, 0, Camera::SHADER_SIZE)
                 .unwrap();
 
             UniformBuffer::new(camera_buffer).write(&camera).unwrap();
         }
         frame
             .render_pass
-            .set_bind_group(0, &frame.renderer.camera_bind_group, &[]);
+            .set_bind_group(0, &renderer.camera_bind_group, &[]);
 
         Self {
             frame,
-            camera_position,
-            quads: vec![],
+            camera_size: cgmath::vec2(camera_height * aspect, camera_height),
+            quads: SparseSecondaryMap::new(),
         }
+    }
+
+    pub fn get_camera_size(&self) -> cgmath::Vector2<f32> {
+        self.camera_size
     }
 
     pub fn reserve_quads(&mut self, additional: usize) {
@@ -336,61 +454,86 @@ impl<'renderer, 'frame> Rendering2D<'renderer, 'frame> {
         position: cgmath::Vector2<f32>,
         size: cgmath::Vector2<f32>,
         color: cgmath::Vector4<f32>,
+        rotation: f32,
+        texture: Option<TextureId>,
     ) {
-        self.quads.push(Quad {
-            position: position - self.camera_position,
-            size,
-            color,
-        });
+        self.quads
+            .entry(texture.unwrap_or(self.frame.renderer.default_texture))
+            .unwrap()
+            .or_default()
+            .push(Quad {
+                position,
+                size,
+                color,
+                rotation: rotation.to_radians(),
+            });
     }
 }
 
 impl Drop for Rendering2D<'_, '_> {
     fn drop(&mut self) {
-        // Upload quads
+        let renderer = &mut *self.frame.renderer;
+
+        // Draw background
         {
-            let size = self.quads.size();
-
-            if size.get() > self.frame.renderer.quads_storage_buffer.size() {
-                self.frame.renderer.quads_storage_buffer = self
-                    .frame
-                    .renderer
-                    .device
-                    .create_buffer(&wgpu::BufferDescriptor {
-                        label: Some("Quads Storage Buffer"),
-                        size: size.get(),
-                        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                        mapped_at_creation: false,
-                    });
-                self.frame.renderer.quads_bind_group = self
-                    .frame
-                    .renderer
-                    .device
-                    .create_bind_group(&wgpu::BindGroupDescriptor {
-                        label: Some("Quads Bind Group"),
-                        layout: &self.frame.renderer.quads_bind_group_layout,
-                        entries: &[wgpu::BindGroupEntry {
-                            binding: 0,
-                            resource: self.frame.renderer.quads_storage_buffer.as_entire_binding(),
-                        }],
-                    });
-            }
-
-            let buffer = &mut *self
-                .frame
-                .renderer
-                .queue
-                .write_buffer_with(&self.frame.renderer.quads_storage_buffer, 0, size)
-                .unwrap();
-
-            StorageBuffer::new(buffer).write(&self.quads).unwrap();
+            self.frame
+                .render_pass
+                .set_pipeline(&renderer.background_render_pipeline);
+            self.frame.render_pass.draw(0..4, 0..1);
         }
-        self.frame
-            .render_pass
-            .set_bind_group(1, &self.frame.renderer.quads_bind_group, &[]);
 
-        self.frame
-            .render_pass
-            .draw(0..4, 0..self.quads.len().try_into().unwrap());
+        // Draw quads
+        {
+            self.frame
+                .render_pass
+                .set_pipeline(&renderer.quad_render_pipeline);
+
+            // Upload quads
+            for (texture, quads) in &self.quads {
+                {
+                    let size = quads.size();
+
+                    if size.get() > renderer.quads_storage_buffer.size() {
+                        renderer.quads_storage_buffer =
+                            renderer.device.create_buffer(&wgpu::BufferDescriptor {
+                                label: Some("Quads Storage Buffer"),
+                                size: size.get(),
+                                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                                mapped_at_creation: false,
+                            });
+                        renderer.quads_bind_group =
+                            renderer
+                                .device
+                                .create_bind_group(&wgpu::BindGroupDescriptor {
+                                    label: Some("Quads Bind Group"),
+                                    layout: &renderer.quads_bind_group_layout,
+                                    entries: &[wgpu::BindGroupEntry {
+                                        binding: 0,
+                                        resource: renderer.quads_storage_buffer.as_entire_binding(),
+                                    }],
+                                });
+                    }
+
+                    let buffer = &mut *renderer
+                        .queue
+                        .write_buffer_with(&renderer.quads_storage_buffer, 0, size)
+                        .unwrap();
+
+                    StorageBuffer::new(buffer).write(quads).unwrap();
+                }
+                self.frame
+                    .render_pass
+                    .set_bind_group(1, &renderer.quads_bind_group, &[]);
+
+                self.frame.render_pass.set_bind_group(
+                    2,
+                    &renderer.textures[texture].bind_group,
+                    &[],
+                );
+                self.frame
+                    .render_pass
+                    .draw(0..4, 0..self.quads.len().try_into().unwrap());
+            }
+        }
     }
 }

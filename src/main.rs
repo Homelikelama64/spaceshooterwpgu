@@ -1,15 +1,20 @@
 #![deny(rust_2018_idioms)]
 
-use renderer::{FrameRendering, Renderer, Rendering2D};
-use std::sync::Arc;
+use game::Game;
+use renderer::{FrameRendering, Renderer};
+use std::{
+    sync::Arc,
+    time::{Duration, Instant},
+};
 use winit::{
     event::{Event, WindowEvent},
     event_loop::{ControlFlow, EventLoop},
     window::WindowBuilder,
 };
 
-mod always_some;
-mod renderer;
+pub mod always_some;
+mod game;
+pub mod renderer;
 
 fn main() {
     let event_loop = EventLoop::new().unwrap();
@@ -23,6 +28,9 @@ fn main() {
     );
 
     let mut renderer = pollster::block_on(Renderer::new(window.clone()));
+    let mut game = Game::new(&mut renderer);
+
+    let mut last_frame = None;
 
     window.set_visible(true);
     event_loop.set_control_flow(ControlFlow::Poll);
@@ -44,6 +52,14 @@ fn main() {
             }
 
             Event::AboutToWait => {
+                let time = Instant::now();
+                let dt = last_frame
+                    .map(|last_frame| time - last_frame)
+                    .unwrap_or(Duration::ZERO)
+                    .as_secs_f32();
+                last_frame = Some(time);
+
+                game.update(dt);
                 window.request_redraw();
             }
 
@@ -54,7 +70,7 @@ fn main() {
                 let clear_color = wgpu::Color {
                     r: 1.0,
                     g: 0.0,
-                    b: 0.0,
+                    b: 1.0,
                     a: 1.0,
                 };
 
@@ -62,12 +78,7 @@ fn main() {
                     return;
                 };
 
-                let mut rendering = Rendering2D::new(&mut frame, cgmath::vec2(0.0, 0.0), 1.0);
-                rendering.draw_quad(
-                    cgmath::vec2(0.0, 0.0),
-                    cgmath::vec2(0.5, 0.2),
-                    cgmath::vec4(0.0, 1.0, 0.0, 1.0),
-                );
+                game.render(&mut frame);
             }
 
             _ => (),
