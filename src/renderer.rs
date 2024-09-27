@@ -430,9 +430,9 @@ impl<'renderer, 'frame> Rendering2D<'renderer, 'frame> {
 
             UniformBuffer::new(camera_buffer).write(&camera).unwrap();
         }
-        frame
-            .render_pass
-            .set_bind_group(0, &renderer.camera_bind_group, &[]);
+        // frame
+        //     .render_pass
+        //     .set_bind_group(0, &renderer.camera_bind_group, &[]);
 
         Self {
             frame,
@@ -474,13 +474,13 @@ impl Drop for Rendering2D<'_, '_> {
     fn drop(&mut self) {
         let renderer = &mut *self.frame.renderer;
 
-        // Draw background
-        {
-            self.frame
-                .render_pass
-                .set_pipeline(&renderer.background_render_pipeline);
-            self.frame.render_pass.draw(0..4, 0..1);
-        }
+        // // Draw background
+        // {
+        //     self.frame
+        //         .render_pass
+        //         .set_pipeline(&renderer.background_render_pipeline);
+        //     self.frame.render_pass.draw(0..4, 0..1);
+        // }
 
         // Draw quads
         {
@@ -521,10 +521,18 @@ impl Drop for Rendering2D<'_, '_> {
 
                     StorageBuffer::new(buffer).write(quads).unwrap();
                 }
+                // Draw background
+                {
+                    self.frame
+                        .render_pass
+                        .set_pipeline(&renderer.background_render_pipeline);
+                }
+                self.frame
+                .render_pass
+                .set_bind_group(0, &renderer.camera_bind_group, &[]);
                 self.frame
                     .render_pass
                     .set_bind_group(1, &renderer.quads_bind_group, &[]);
-
                 self.frame.render_pass.set_bind_group(
                     2,
                     &renderer.textures[texture].bind_group,
