@@ -2,7 +2,7 @@ use cgmath::{InnerSpace, MetricSpace, Vector2, Vector4};
 
 use crate::renderer::Rendering2D;
 
-use super::{particalexplosion, Bullet, Enemy, Partical, Player};
+use super::{particalexplosion, vectortoangle, Bullet, Enemy, Partical, Player};
 
 
 pub fn update_bullets(player: &mut Player, bullets: &mut Vec<Bullet>, enemies: &mut Vec<Enemy>,particals: &mut Vec<Partical>,dt:f32) {
@@ -70,7 +70,7 @@ pub fn update_bullets(player: &mut Player, bullets: &mut Vec<Bullet>, enemies: &
     }
 }
 
-pub fn draw_bullets(drawing:&mut Rendering2D<'_,'_>,player: &Player,bullets: &mut Vec<Bullet>,screenwidth:i32,screenheight:i32) {
+pub fn draw_bullets(drawing:&mut Rendering2D<'_,'_>,bullets: &mut Vec<Bullet>) {
     for bullet in bullets {
         let bullet_scale = 1.0 - bullet.time / bullet.duration;
         let bullet_width = bullet.size * bullet_scale;
@@ -83,7 +83,7 @@ pub fn draw_bullets(drawing:&mut Rendering2D<'_,'_>,player: &Player,bullets: &mu
             bullet.pos,
             Vector2 { x: bullet_width, y: bullet_length },
             color,
-            bullet.vel.angle(Vector2::unit_y()).0.to_degrees(),
+            vectortoangle(bullet.vel).to_degrees() - 90.0,
             None,
         );
         //d.draw_rectangle_pro(

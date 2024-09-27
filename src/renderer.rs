@@ -30,9 +30,8 @@ pub struct Renderer {
     queue: wgpu::Queue,
     camera_uniform_buffer: wgpu::Buffer,
     camera_bind_group: wgpu::BindGroup,
-    quads_storage_buffer: wgpu::Buffer,
     quads_bind_group_layout: wgpu::BindGroupLayout,
-    quads_bind_group: wgpu::BindGroup,
+    quad_buffers: SparseSecondaryMap<TextureId, (wgpu::Buffer, wgpu::BindGroup)>,
     texture_bind_group_layout: wgpu::BindGroupLayout,
     quad_render_pipeline: wgpu::RenderPipeline,
     background_render_pipeline: wgpu::RenderPipeline,
@@ -289,9 +288,8 @@ impl Renderer {
             queue,
             camera_uniform_buffer,
             camera_bind_group,
-            quads_storage_buffer,
             quads_bind_group_layout,
-            quads_bind_group,
+            quad_buffers: SparseSecondaryMap::new(),
             texture_bind_group_layout,
             quad_render_pipeline,
             background_render_pipeline,
@@ -484,60 +482,69 @@ impl Drop for Rendering2D<'_, '_> {
 
         // Draw quads
         {
-            // self.frame
-            //     .render_pass
-            //     .set_pipeline(&renderer.quad_render_pipeline);
+            self.frame
+                .render_pass
+                .set_pipeline(&renderer.quad_render_pipeline);
 
             // Upload quads
             for (texture, quads) in &self.quads {
-                {
-                    let size = quads.size();
+                let quads_size = quads.size();
 
-                    if size.get() > renderer.quads_storage_buffer.size() {
-                        renderer.quads_storage_buffer =
-                            renderer.device.create_buffer(&wgpu::BufferDescriptor {
-                                label: Some("Quads Storage Buffer"),
-                                size: size.get(),
-                                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-                                mapped_at_creation: false,
-                            });
-                        renderer.quads_bind_group =
-                            renderer
-                                .device
-                                .create_bind_group(&wgpu::BindGroupDescriptor {
-                                    label: Some("Quads Bind Group"),
-                                    layout: &renderer.quads_bind_group_layout,
-                                    entries: &[wgpu::BindGroupEntry {
-                                        binding: 0,
-                                        resource: renderer.quads_storage_buffer.as_entire_binding(),
-                                    }],
+                let (quads_storage_buffer, quads_bind_group) =
+                    match renderer.quad_buffers.entry(texture).unwrap() {
+                        slotmap::sparse_secondary::Entry::Occupied(occupied_entry)
+                            if quads_size.get() <= occupied_entry.get().0.size() =>
+                        {
+                            occupied_entry.into_mut()
+                        }
+                        _ => {
+                            let quads_storage_buffer =
+                                renderer.device.create_buffer(&wgpu::BufferDescriptor {
+                                    label: Some("Quads Storage Buffer"),
+                                    size: quads_size.get(),
+                                    usage: wgpu::BufferUsages::STORAGE
+                                        | wgpu::BufferUsages::COPY_DST,
+                                    mapped_at_creation: false,
                                 });
-                    }
+                            let quads_bind_group =
+                                renderer
+                                    .device
+                                    .create_bind_group(&wgpu::BindGroupDescriptor {
+                                        label: Some("Quads Bind Group"),
+                                        layout: &renderer.quads_bind_group_layout,
+                                        entries: &[wgpu::BindGroupEntry {
+                                            binding: 0,
+                                            resource: quads_storage_buffer.as_entire_binding(),
+                                        }],
+                                    });
+                            renderer
+                                .quad_buffers
+                                .insert(texture, (quads_storage_buffer, quads_bind_group));
+                            renderer.quad_buffers.get_mut(texture).unwrap()
+                        }
+                    };
 
+                {
                     let buffer = &mut *renderer
                         .queue
-                        .write_buffer_with(&renderer.quads_storage_buffer, 0, size)
+                        .write_buffer_with(quads_storage_buffer, 0, quads_size)
                         .unwrap();
 
                     StorageBuffer::new(buffer).write(quads).unwrap();
                 }
-                //new stuff
-                self.frame
-                .render_pass
-                .set_pipeline(&renderer.quad_render_pipeline);
 
                 self.frame
                     .render_pass
-                    .set_bind_group(1, &renderer.quads_bind_group, &[]);
-
+                    .set_bind_group(1, quads_bind_group, &[]);
                 self.frame.render_pass.set_bind_group(
                     2,
                     &renderer.textures[texture].bind_group,
                     &[],
                 );
+
                 self.frame
                     .render_pass
-                    .draw(0..4, 0..self.quads.len().try_into().unwrap());
+                    .draw(0..4, 0..quads.len().try_into().unwrap());
             }
         }
     }

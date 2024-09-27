@@ -1,7 +1,9 @@
+use std::path::Path;
+
 use crate::renderer::{self, texture::TextureId, Renderer, Rendering2D};
 
 use super::{
-    angletovector, rotatevector, vectortoangle, Bullet, BulletEmitter, Damage, DamageType, Enemy, Part, PartMod, Partical, ParticalEmitter, ParticalShape, Player
+    angletovector, load_texture, rotatevector, vectortoangle, Bullet, BulletEmitter, Damage, DamageType, Enemy, Part, PartMod, Partical, ParticalEmitter, ParticalShape, Player
 };
 use cgmath::{InnerSpace, Vector2, Vector4, Zero};
 use rand::Rng;
@@ -153,7 +155,7 @@ pub fn init_player(renderer:&mut Renderer) -> Player {
         speed: 0.0,
         left_turn: 0.0,
         right_turn: 0.0,
-        texture_id: renderer.create_texture("Yellow", 1, 1, &[255, 255, 255, 255]),
+        texture_id: load_texture(renderer, "Player Texture", Path::new("images/V1Ship.png")),
     }
 }
 
@@ -292,7 +294,7 @@ pub fn update_player(
 }
 
 pub fn draw_player(drawing: &mut Rendering2D<'_, '_>, player: &Player, ship_image: TextureId) {
-    let ship_scale = 2.0;
+    let ship_scale = 1.0;
     drawing.draw_quad(
         player.pos,
         Vector2 { x: 64.0 * ship_scale, y: 64.0 * ship_scale},
@@ -302,7 +304,7 @@ pub fn draw_player(drawing: &mut Rendering2D<'_, '_>, player: &Player, ship_imag
             z: 1.0,
             w: 1.0,
         },
-        vectortoangle(player.dir).to_degrees() + 90.0,
+        vectortoangle(player.dir).to_degrees() - 90.0,
         Some(ship_image),
     );
     //drawing.draw_texture_pro(

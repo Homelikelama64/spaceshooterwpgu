@@ -1,13 +1,18 @@
-use crate::renderer::{texture::TextureId, FrameRendering, Renderer, Rendering2D};
+use crate::renderer::{self, texture::TextureId, FrameRendering, Renderer, Rendering2D};
 use bullets::*;
 use cgmath::{Vector2, Vector4, Zero};
 use debug::*;
 use enemy::*;
+use image::EncodableLayout;
 use particals::*;
 use player::*;
-//use powerups::*;
+use powerups::*;
 use rand::Rng;
-use std::io::Write;
+use std::{
+    fs::File,
+    io::{BufReader, Write},
+    path::Path,
+};
 use waves::*;
 
 mod bullets;
@@ -15,7 +20,7 @@ mod debug;
 mod enemy;
 mod particals;
 mod player;
-//mod powerups;
+mod powerups;
 mod waves;
 
 pub struct Game {
@@ -26,6 +31,7 @@ pub struct Game {
     bullets: Vec<Bullet>,
     particals: Vec<Partical>,
     waves: Vec<Wave>,
+    power_ups: Vec<PowerUp>,
     enemy_warning_image: TextureId,
 }
 
@@ -185,70 +191,68 @@ impl Game {
             bullets: vec![],
             particals: vec![],
             waves: init_waves(renderer),
-            enemy_warning_image: renderer.create_texture("Yellow", 1, 1, &[255, 255, 255, 255]),
+            power_ups: vec![PowerUp {
+                pos: Vector2::zero(),
+                power_type: PowerUpType::Repair,
+                texture: load_texture(renderer, "repair", Path::new("images/Repair.png")),
+            }],
+            enemy_warning_image: load_texture(
+                renderer,
+                "enemy_warning_image",
+                Path::new("images/EnemyWarning.png"),
+            ),
         }
     }
 
     pub fn update(&mut self, dt: f32) {
-        print!("\r{}", 1.0 / dt);
-        std::io::stdout().flush().unwrap();
-        //self.camera_pos = self.player.pos;
-        //update_player(
-        //    &mut self.player,
-        //    &mut self.enemies,
-        //    &mut self.bullets,
-        //    &mut self.particals,
-        //    dt,
-        //);
-        //update_waves(&mut self.waves, &self.player, &mut self.enemies, dt);
-        //update_enemies(
-        //    &mut self.player,
-        //    &mut self.enemies,
-        //    &mut self.particals,
-        //    &mut self.bullets,
-        //    dt,
-        //);
-        //update_bullets(
-        //    &mut self.player,
-        //    &mut self.bullets,
-        //    &mut self.enemies,
-        //    &mut self.particals,
-        //    dt,
-        //);
-        //update_particals(&mut self.particals, dt);
+        //print!("\r{}", 1.0 / dt);
+        //std::io::stdout().flush().unwrap();
+        self.camera_pos = self.player.pos;
+        update_player(
+            &mut self.player,
+            &mut self.enemies,
+            &mut self.bullets,
+            &mut self.particals,
+            dt,
+        );
+        update_waves(&mut self.waves, &self.player, &mut self.enemies, dt);
+        update_enemies(
+            &mut self.player,
+            &mut self.enemies,
+            &mut self.particals,
+            &mut self.bullets,
+            dt,
+        );
+        update_bullets(
+            &mut self.player,
+            &mut self.bullets,
+            &mut self.enemies,
+            &mut self.particals,
+            dt,
+        );
+        update_particals(&mut self.particals, dt);
     }
 
     pub fn render(&mut self, frame: &mut FrameRendering<'_>) {
         let mut drawing = Rendering2D::new(frame, self.camera_pos, 1000.0);
-        //draw_player(&mut drawing, &self.player, self.player.texture_id);
-        //draw_enemies(&mut drawing, &self.player, &self.enemies, &self.enemy_warning_image);
-        //draw_particals(&mut drawing, &mut self.particals);
-        drawing.draw_quad(
-            Vector2 { x: 64.0, y: 0.0 },
-            Vector2 { x: 64.0, y: 64.0 },
-            Vector4 {
-                x: 1.0,
-                y: 1.0,
-                z: 1.0,
-                w: 1.0,
-            },
-            0.0,
-            Some(self.enemy_warning_image),
+        power_ups_update(&mut drawing, &mut self.player, &mut self.power_ups);
+        draw_player(&mut drawing, &self.player, self.player.texture_id);
+        draw_enemies(
+            &mut drawing,
+            &self.player,
+            &self.enemies,
+            &self.enemy_warning_image,
         );
-        drawing.draw_quad(
-            Vector2 { x: -64.0, y: 0.0 },
-            Vector2 { x: 64.0, y: 64.0 },
-            Vector4 {
-                x: 1.0,
-                y: 1.0,
-                z: 1.0,
-                w: 1.0,
-            },
-            0.0,
-            None,
-        );
+        draw_particals(&mut drawing, &mut self.particals);
+        draw_bullets(&mut drawing, &mut self.bullets);
     }
 }
+
+fn load_texture(renderer: &mut Renderer, name: &str, path: &Path) -> TextureId {
+    let image = image::open(path).unwrap().flipv().into_rgba8();
+    renderer.create_texture(name, image.width(), image.height(), image.as_bytes())
+}
+
 fn get_2_mut<T>(xs: &mut [T], a: usize, b: usize) -> Option<(&mut T, &mut T)> {
     if a == b || a >= xs.len() || b >= xs.len() {
         return None;

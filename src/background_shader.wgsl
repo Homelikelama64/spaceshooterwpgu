@@ -27,8 +27,8 @@ fn vertex(input: VertexInput) -> VertexOutput {
         0.0,
         1.0,
     );
-
-    output.world_position = camera.position + output.clip_position.xy * (camera.view_height / 2.0 * vec2<f32>(camera.aspect, 1.0));
+    let scale = 0.5;
+    output.world_position = camera.position * scale + output.clip_position.xy * (camera.view_height * scale * vec2<f32>(camera.aspect, 1.0));
 
     return output;
 }
@@ -48,25 +48,14 @@ fn fragment(input: VertexOutput) -> @location(0) vec4<f32> {
 
     let value = random_value(&state);
     if random_value(&state) < 1.0 / camera.view_height {
-       output = vec4<f32>(
-           value,
-           value,
-           value,
-           1.0,
-       );
+        output = vec4<f32>(
+            value,
+            value,
+            value,
+            1.0,
+        );
     }
 
-    var state_new = bitcast<u32>(i32((input.world_position.x + offset_x) / 2)) * bitcast<u32>(i32((input.world_position.y + offset_y) / 2));
-
-    let value_new = random_value(&state_new);
-    if random_value(&state_new) < 1.0 / camera.view_height {
-       output += vec4<f32>(
-           value_new / 2,
-           value_new / 2,
-           value_new / 2,
-           1.0,
-       );
-    }
 
     return output;
 }

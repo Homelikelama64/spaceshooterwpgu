@@ -1,8 +1,10 @@
+use std::path::Path;
+
 use cgmath::{Vector2, Vector4, Zero};
 use rand::Rng;
 use slotmap::SlotMap;
 
-use crate::{game::{BulletEmitter, Enemy, ParticalEmitter, ParticalShape}, renderer::{texture::{Texture, TextureId}, Renderer, Rendering2D}};
+use crate::{game::{load_texture, BulletEmitter, Enemy, ParticalEmitter, ParticalShape}, renderer::{texture::{Texture, TextureId}, Renderer, Rendering2D}};
 
 use super::{angletovector, Player, Wave};
 
@@ -21,7 +23,7 @@ pub fn init_waves(
             enemy: Enemy {
                 name: format!("Basic"),
                 pos: Vector2::zero(),
-                vel: Vector2::zero(),
+                vel: Vector2 { x: 0.0, y: 1.0 },
                 dir: Vector2::zero(),
                 targetpos: Vector2 { x: 200.0, y: 200.0 },
                 speed: 600.0,
@@ -56,7 +58,7 @@ pub fn init_waves(
                     speed: 0.0,
                 }],
                 bullet_emmiters: vec![],
-                texture_id: renderer.create_texture("Wow Image", 1, 1, &[255, 255, 255, 255]),
+                texture_id: load_texture(renderer, "Basic Enemy Texture", Path::new("images/V1Enemy.png")),
                 extra_texture_ids: vec![],
             },
         },
@@ -70,7 +72,7 @@ pub fn init_waves(
             enemy: Enemy {
                 name: format!("Turret"),
                 pos: Vector2::zero(),
-                vel: Vector2::zero(),
+                vel: Vector2 { x: 0.0, y: 1.0 },
                 dir: Vector2::zero(),
                 targetpos: Vector2 { x: 200.0, y: 200.0 },
                 speed: 500.0,
@@ -114,8 +116,8 @@ pub fn init_waves(
                     bullet_interval: 1.0 / 2.0,
                     time: 0.0,
                 }],
-                texture_id: renderer.create_texture("Wow Image", 1, 1, &[255, 255, 255, 255]),
-                extra_texture_ids: vec![renderer.create_texture("Wow Image", 1, 1, &[255, 255, 255, 255])],
+                texture_id: load_texture(renderer, "Turret Base Enemy Texture", Path::new("images/V2EnemyBase.png")),
+                extra_texture_ids: vec![load_texture(renderer, "Turret Top Enemy Texture", Path::new("images/V2EnemyCannon.png"))],
             },
         },
     ]

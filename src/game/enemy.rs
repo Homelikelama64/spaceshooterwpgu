@@ -159,11 +159,12 @@ pub fn update_enemies(
             };
         }
     }
-    for enemy in enemies {
+    for enemy in enemies.iter_mut() {
         if enemy.health <= 0.0 {
             enemy_dies(enemy.pos, enemy.vel, particals);
         }
     }
+    enemies.retain(|enemy| enemy.health > 0.0);
 }
 
 pub fn draw_enemies(
@@ -173,29 +174,9 @@ pub fn draw_enemies(
     enemy_warning_image: &TextureId,
 ) {
     for enemy in enemies {
-        let pos = Vector2 {
-            x: enemy.pos.x,
-            y: enemy.pos.y,
-        };
 
-        //drawing.draw_texture_pro(
-        //    image,
-        //    Rectangle::new(0.0, 0.0, image.width as f32, image.height as f32),
-        //    Rectangle::new(
-        //        pos.x,
-        //        pos.y,
-        //        image.width as f32 * enemy.texture_scale,
-        //        image.height as f32 * enemy.texture_scale,
-        //    ),
-        //    Vector2::new(
-        //        image.width as f32 / 2.0 * enemy.texture_scale,
-        //        image.height as f32 / 2.0 * enemy.texture_scale,
-        //    ),
-        //    vectortoangle(enemy.dir).to_degrees() + 90.0,
-        //    Color::WHITE,
-        //);
         drawing.draw_quad(
-            pos,
+            enemy.pos,
             Vector2 { x: 32.0, y: 32.0 },
             Vector4 {
                 x: 1.0,
@@ -203,33 +184,12 @@ pub fn draw_enemies(
                 z: 1.0,
                 w: 1.0,
             },
-            player.dir.angle(Vector2::unit_y()).0.to_degrees(),
+            vectortoangle(enemy.dir).to_degrees() - 90.0,
             Some(enemy.texture_id),
         );
-        if enemy.name == "Turret".to_string() {
-            //drawing.draw_texture_pro(
-            //    &textures[enemy.extra_texture_ids[0]],
-            //    Rectangle::new(
-            //        0.0,
-            //        0.0,
-            //        textures[enemy.extra_texture_ids[0]].width as f32,
-            //        textures[enemy.extra_texture_ids[0]].height as f32,
-            //    ),
-            //    Rectangle::new(
-            //        pos.x,
-            //        pos.y + 1.0,
-            //        textures[enemy.extra_texture_ids[0]].width as f32 * enemy.texture_scale,
-            //        textures[enemy.extra_texture_ids[0]].height as f32 * enemy.texture_scale,
-            //    ),
-            //    Vector2::new(
-            //        textures[enemy.extra_texture_ids[0]].width as f32 / 2.0 * enemy.texture_scale,
-            //        textures[enemy.extra_texture_ids[0]].height as f32 / 2.0 * enemy.texture_scale,
-            //    ),
-            //    vectortoangle((player.pos - enemy.pos).normalize()).to_degrees() + 90.0,
-            //    Color::WHITE,
-            //);
+        if enemy.name == "Turret" {
             drawing.draw_quad(
-                pos,
+                enemy.pos,
                 Vector2 { x: 32.0, y: 32.0 },
                 Vector4 {
                     x: 1.0,
@@ -237,21 +197,11 @@ pub fn draw_enemies(
                     z: 1.0,
                     w: 1.0,
                 },
-                (player.pos - enemy.pos).normalize().angle(Vector2::unit_y()).0.to_degrees(),
-                Some(enemy.texture_id),
+                (player.pos - enemy.pos).normalize().angle(Vector2::unit_y()).0.to_degrees() - 90.0,
+                Some(enemy.extra_texture_ids[0]),
             );
         }
         if player.pos.distance(enemy.pos) > 170.0 {
-            //drawing.draw_texture_v(
-            //    &enemy_warning_image,
-            //    (enemy.pos - player.pos).normalize() * 170.0
-            //        + Vector2::new(screenwidth as f32 / 2.0, screenheight as f32 / 2.0)
-            //        - Vector2::new(
-            //            enemy_warning_image.width as f32 / 2.0,
-            //            enemy_warning_image.height as f32 / 2.0,
-            //        ),
-            //    Color::WHITE,
-            //)
             drawing.draw_quad(
                 (enemy.pos - player.pos).normalize() * 170.0 + player.pos,
                 Vector2 { x: 32.0, y: 32.0 },
@@ -262,8 +212,7 @@ pub fn draw_enemies(
                     w: 1.0,
                 },
                 0.0,
-                None,
-                //Some(*enemy_warning_image),
+                Some(*enemy_warning_image),
             );
         }
     }
