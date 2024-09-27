@@ -1,15 +1,14 @@
+use cgmath::{Vector2, Vector4, Zero};
 use rand::Rng;
-use raylib::prelude::*;
 use slotmap::SlotMap;
 
-use crate::{
-    angletovector, BulletEmitter, Enemy, ParticalEmitter, ParticalShape, Player, TextureID, Wave,
-};
+use crate::{game::{BulletEmitter, Enemy, ParticalEmitter, ParticalShape}, renderer::{texture::{Texture, TextureId}, Renderer, Rendering2D}};
+
+use super::{angletovector, Player, Wave};
+
 
 pub fn init_waves(
-    textures: &mut SlotMap<TextureID, Texture2D>,
-    rl: &mut RaylibHandle,
-    thread: &RaylibThread,
+    renderer:&mut Renderer,
 ) -> Vec<Wave> {
     vec![
         Wave {
@@ -39,17 +38,17 @@ pub fn init_waves(
                     speed_orginal: 400.0,
                     size: 5.0,
                     shape: ParticalShape::Square,
-                    starting_color: Color {
-                        r: 255,
-                        g: 255,
-                        b: 0,
-                        a: 255,
+                    starting_color: Vector4 {
+                        x: 255.0 / 255.0,
+                        y: 255.0 / 255.0,
+                        z: 0.0 / 255.0,
+                        w: 255.0 / 255.0,
                     },
-                    ending_color: Color {
-                        r: 255,
-                        g: 0,
-                        b: 50,
-                        a: 0,
+                    ending_color: Vector4 {
+                        x: 255.0 / 255.0,
+                        y: 0.0 / 255.0,
+                        z: 50.0 / 255.0,
+                        w: 0.0 / 255.0,
                     },
                     duration: 1.0,
                     partical_interval: 1.0 / 400.0,
@@ -57,8 +56,7 @@ pub fn init_waves(
                     speed: 0.0,
                 }],
                 bullet_emmiters: vec![],
-                texture_id: textures
-                    .insert(rl.load_texture(&thread, "Images/V1Enemy.png").unwrap()),
+                texture_id: renderer.create_texture("Wow Image", 1, 1, &[255, 255, 255, 255]),
                 extra_texture_ids: vec![],
             },
         },
@@ -89,17 +87,17 @@ pub fn init_waves(
                     speed_orginal: 800.0,
                     size: 10.0,
                     shape: ParticalShape::Square,
-                    starting_color: Color {
-                        r: 255,
-                        g: 255,
-                        b: 0,
-                        a: 255,
+                    starting_color: Vector4 {
+                        x: 255.0 / 255.0,
+                        y: 255.0 / 255.0,
+                        z: 0.0 / 255.0,
+                        w: 255.0 / 255.0,
                     },
-                    ending_color: Color {
-                        r: 255,
-                        g: 0,
-                        b: 50,
-                        a: 0,
+                    ending_color: Vector4 {
+                        x: 255.0 / 255.0,
+                        y: 0.0 / 255.0,
+                        z: 50.0 / 255.0,
+                        w: 0.0 / 255.0,
                     },
                     duration: 1.0,
                     partical_interval: 1.0 / 400.0,
@@ -116,12 +114,8 @@ pub fn init_waves(
                     bullet_interval: 1.0 / 2.0,
                     time: 0.0,
                 }],
-                texture_id: textures
-                    .insert(rl.load_texture(&thread, "Images/V2EnemyBase.png").unwrap()),
-                extra_texture_ids: vec![textures.insert(
-                    rl.load_texture(&thread, "Images/V2EnemyCannon.png")
-                        .unwrap(),
-                )],
+                texture_id: renderer.create_texture("Wow Image", 1, 1, &[255, 255, 255, 255]),
+                extra_texture_ids: vec![renderer.create_texture("Wow Image", 1, 1, &[255, 255, 255, 255])],
             },
         },
     ]

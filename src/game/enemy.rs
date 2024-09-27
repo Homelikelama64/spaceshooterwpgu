@@ -1,11 +1,16 @@
+use cgmath::{InnerSpace, MetricSpace, Vector2, Vector4};
 use rand::Rng;
 use slotmap::SlotMap;
 
-use crate::{
-    angletovector, enemy_dies, get_2_mut, particalexplosion, rotatevector, vectortoangle, Bullet,
-    Enemy, Partical, Player, TextureID,
+use crate::renderer::{
+    texture::{Texture, TextureId},
+    Rendering2D,
 };
-use raylib::prelude::*;
+
+use super::{
+    angletovector, enemy_dies, get_2_mut, particalexplosion, rotatevector, vectortoangle, Bullet,
+    Enemy, Partical, Player,
+};
 
 pub fn update_enemies(
     player: &mut Player,
@@ -25,8 +30,8 @@ pub fn update_enemies(
         if enemy.predictive {
             let mut time_to_reach = 0.0;
             for _ in 0..10 {
-                enemy.targetpos = player.pos + player.dir * player.vel.length() * time_to_reach;
-                time_to_reach = enemy.targetpos.distance_to(enemy.pos) / enemy.vel.length();
+                enemy.targetpos = player.pos + player.dir * player.vel.magnitude() * time_to_reach;
+                time_to_reach = enemy.targetpos.distance(enemy.pos) / enemy.vel.magnitude();
             }
         } else {
             if enemy.name == "Basic".to_string() {
@@ -36,7 +41,7 @@ pub fn update_enemies(
             if enemy.name == "Turret".to_string() {
                 enemy.targetpos = player.pos
                     + rotatevector(
-                        (enemy.pos - player.pos).normalized(),
+                        (enemy.pos - player.pos).normalize(),
                         std::f32::consts::TAU / 8.0 * sign,
                     ) * 200.0
             }
@@ -48,9 +53,9 @@ pub fn update_enemies(
             enemy.dir =
                 angletovector(vectortoangle(enemy.dir) - (enemy.turningspeed.to_radians() * dt))
         }
-        enemy.vel += enemy.dir.normalized()
+        enemy.vel += enemy.dir.normalize()
             * (enemy.speed
-                - (enemy.vel.length() * (2.0 + (enemy.vel.normalized().dot(enemy.dir) - 1.0))
+                - (enemy.vel.magnitude() * (2.0 + (enemy.vel.normalize().dot(enemy.dir) - 1.0))
                     / 2.0))
             * dt;
 
@@ -85,7 +90,7 @@ pub fn update_enemies(
             }
         }
         for part in &mut player.parts {
-            if enemy.pos.distance_to(part.pos) < part.size + enemy.size {
+            if enemy.pos.distance(part.pos) < part.size + enemy.size {
                 enemy.health = -1.0;
                 part.health -= 1.0;
                 particalexplosion(
@@ -95,17 +100,17 @@ pub fn update_enemies(
                     0.0,
                     300.0,
                     500,
-                    Color {
-                        r: 140,
-                        g: 255,
-                        b: 251,
-                        a: 255,
+                    Vector4 {
+                        x: 140.0 / 255.0,
+                        y: 255.0 / 255.0,
+                        z: 251.0 / 255.0,
+                        w: 255.0 / 255.0,
                     },
-                    Color {
-                        r: 255,
-                        g: 0,
-                        b: 50,
-                        a: 0,
+                    Vector4 {
+                        x: 255.0 / 255.0,
+                        y: 0.0 / 255.0,
+                        z: 50.0 / 255.0,
+                        w: 0.0 / 255.0,
                     },
                     1.0,
                 );
@@ -118,7 +123,7 @@ pub fn update_enemies(
                     vectortoangle(player.pos - enemy.pos) - std::f32::consts::PI / 2.0,
                 );
             let vel =
-                (enemy.vel + player.vel) / 2.0 + (player.pos - enemy.pos).normalized() * 1000.0;
+                (enemy.vel + player.vel) / 2.0 + (player.pos - enemy.pos).normalize() * 1000.0;
             bullet_emmiter.time += dt;
             while bullet_emmiter.time > bullet_emmiter.bullet_interval {
                 if true {
@@ -136,11 +141,11 @@ pub fn update_enemies(
             }
         }
         bullets.retain(|bullet| {
-            bullet.pos.distance_to(enemy.pos) > bullet.size * 2.0 + enemy.size || !bullet.friendly
+            bullet.pos.distance(enemy.pos) > bullet.size * 2.0 + enemy.size || !bullet.friendly
         });
         for part in &player.parts {
             bullets.retain(|bullet| {
-                bullet.pos.distance_to(part.pos) > bullet.size * 2.0 + part.size || bullet.friendly
+                bullet.pos.distance(part.pos) > bullet.size * 2.0 + part.size || bullet.friendly
             });
         }
         for other_enemy_index in 0..enemies.len() {
@@ -148,7 +153,7 @@ pub fn update_enemies(
             else {
                 continue;
             };
-            if enemy.pos.distance_to(other_enemy.pos) < other_enemy.size + enemy.size {
+            if enemy.pos.distance(other_enemy.pos) < other_enemy.size + enemy.size {
                 enemy.health = -1.0;
                 other_enemy.health = -1.0;
             };
@@ -162,71 +167,104 @@ pub fn update_enemies(
 }
 
 pub fn draw_enemies(
-    d: &mut RaylibDrawHandle,
+    drawing: &mut Rendering2D<'_, '_>,
     player: &Player,
     enemies: &Vec<Enemy>,
-    textures: &SlotMap<TextureID, Texture2D>,
-    enemy_warning_image: &Texture2D,
-    screenwidth: i32,
-    screenheight: i32,
+    enemy_warning_image: &TextureId,
 ) {
     for enemy in enemies {
-        let pos = Vector2::new(
-            enemy.pos.x - player.pos.x + screenwidth as f32 / 2.0,
-            enemy.pos.y - player.pos.y + screenheight as f32 / 2.0,
-        );
-        let image: &Texture2D = &textures[enemy.texture_id];
+        let pos = Vector2 {
+            x: enemy.pos.x,
+            y: enemy.pos.y,
+        };
 
-        d.draw_texture_pro(
-            image,
-            Rectangle::new(0.0, 0.0, image.width as f32, image.height as f32),
-            Rectangle::new(
-                pos.x,
-                pos.y,
-                image.width as f32 * enemy.texture_scale,
-                image.height as f32 * enemy.texture_scale,
-            ),
-            Vector2::new(
-                image.width as f32 / 2.0 * enemy.texture_scale,
-                image.height as f32 / 2.0 * enemy.texture_scale,
-            ),
-            vectortoangle(enemy.dir).to_degrees() + 90.0,
-            Color::WHITE,
+        //drawing.draw_texture_pro(
+        //    image,
+        //    Rectangle::new(0.0, 0.0, image.width as f32, image.height as f32),
+        //    Rectangle::new(
+        //        pos.x,
+        //        pos.y,
+        //        image.width as f32 * enemy.texture_scale,
+        //        image.height as f32 * enemy.texture_scale,
+        //    ),
+        //    Vector2::new(
+        //        image.width as f32 / 2.0 * enemy.texture_scale,
+        //        image.height as f32 / 2.0 * enemy.texture_scale,
+        //    ),
+        //    vectortoangle(enemy.dir).to_degrees() + 90.0,
+        //    Color::WHITE,
+        //);
+        drawing.draw_quad(
+            pos,
+            Vector2 { x: 32.0, y: 32.0 },
+            Vector4 {
+                x: 1.0,
+                y: 1.0,
+                z: 1.0,
+                w: 1.0,
+            },
+            player.dir.angle(Vector2::unit_y()).0.to_degrees(),
+            Some(enemy.texture_id),
         );
         if enemy.name == "Turret".to_string() {
-            d.draw_texture_pro(
-                &textures[enemy.extra_texture_ids[0]],
-                Rectangle::new(
-                    0.0,
-                    0.0,
-                    textures[enemy.extra_texture_ids[0]].width as f32,
-                    textures[enemy.extra_texture_ids[0]].height as f32,
-                ),
-                Rectangle::new(
-                    pos.x,
-                    pos.y + 1.0,
-                    textures[enemy.extra_texture_ids[0]].width as f32 * enemy.texture_scale,
-                    textures[enemy.extra_texture_ids[0]].height as f32 * enemy.texture_scale,
-                ),
-                Vector2::new(
-                    textures[enemy.extra_texture_ids[0]].width as f32 / 2.0 * enemy.texture_scale,
-                    textures[enemy.extra_texture_ids[0]].height as f32 / 2.0 * enemy.texture_scale,
-                ),
-                vectortoangle((player.pos - enemy.pos).normalized()).to_degrees() + 90.0,
-                Color::WHITE,
+            //drawing.draw_texture_pro(
+            //    &textures[enemy.extra_texture_ids[0]],
+            //    Rectangle::new(
+            //        0.0,
+            //        0.0,
+            //        textures[enemy.extra_texture_ids[0]].width as f32,
+            //        textures[enemy.extra_texture_ids[0]].height as f32,
+            //    ),
+            //    Rectangle::new(
+            //        pos.x,
+            //        pos.y + 1.0,
+            //        textures[enemy.extra_texture_ids[0]].width as f32 * enemy.texture_scale,
+            //        textures[enemy.extra_texture_ids[0]].height as f32 * enemy.texture_scale,
+            //    ),
+            //    Vector2::new(
+            //        textures[enemy.extra_texture_ids[0]].width as f32 / 2.0 * enemy.texture_scale,
+            //        textures[enemy.extra_texture_ids[0]].height as f32 / 2.0 * enemy.texture_scale,
+            //    ),
+            //    vectortoangle((player.pos - enemy.pos).normalize()).to_degrees() + 90.0,
+            //    Color::WHITE,
+            //);
+            drawing.draw_quad(
+                pos,
+                Vector2 { x: 32.0, y: 32.0 },
+                Vector4 {
+                    x: 1.0,
+                    y: 1.0,
+                    z: 1.0,
+                    w: 1.0,
+                },
+                (player.pos - enemy.pos).normalize().angle(Vector2::unit_y()).0.to_degrees(),
+                Some(enemy.texture_id),
             );
         }
-        if player.pos.distance_to(enemy.pos) > 170.0 {
-            d.draw_texture_v(
-                &enemy_warning_image,
-                (enemy.pos - player.pos).normalized() * 170.0
-                    + Vector2::new(screenwidth as f32 / 2.0, screenheight as f32 / 2.0)
-                    - Vector2::new(
-                        enemy_warning_image.width as f32 / 2.0,
-                        enemy_warning_image.height as f32 / 2.0,
-                    ),
-                Color::WHITE,
-            )
+        if player.pos.distance(enemy.pos) > 170.0 {
+            //drawing.draw_texture_v(
+            //    &enemy_warning_image,
+            //    (enemy.pos - player.pos).normalize() * 170.0
+            //        + Vector2::new(screenwidth as f32 / 2.0, screenheight as f32 / 2.0)
+            //        - Vector2::new(
+            //            enemy_warning_image.width as f32 / 2.0,
+            //            enemy_warning_image.height as f32 / 2.0,
+            //        ),
+            //    Color::WHITE,
+            //)
+            drawing.draw_quad(
+                (enemy.pos - player.pos).normalize() * 170.0 + player.pos,
+                Vector2 { x: 32.0, y: 32.0 },
+                Vector4 {
+                    x: 1.0,
+                    y: 1.0,
+                    z: 1.0,
+                    w: 1.0,
+                },
+                0.0,
+                None,
+                //Some(*enemy_warning_image),
+            );
         }
     }
 }
